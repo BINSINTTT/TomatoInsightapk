@@ -689,10 +689,11 @@ private fun FarmTile(
     onDoubleClick: () -> Unit
 ) {
     val hasResult = result != null && result.percent > 0
+    val hasSavedPlant = plantName.isNotBlank() || result != null
     val background = tileResultTone(result)
     val labelColor = if (hasResult) Color.White else Color.Black
     val contentScale = (tileSize.value / 80f).coerceIn(0.35f, 1f)
-    val actionSize = (tileSize * 0.18f).coerceIn(10.dp, 16.dp)
+    val actionSize = (tileSize * 0.24f).coerceIn(14.dp, 22.dp)
     val emojiSize = (if (hasResult) 30.dp else 26.dp) * contentScale
     Box(modifier = Modifier.size(tileSize)) {
         Surface(
@@ -713,7 +714,11 @@ private fun FarmTile(
                     .padding(
                         start = 4.dp * contentScale,
                         end = 4.dp * contentScale,
-                        top = if (isSelected) actionSize * 0.35f else 3.dp * contentScale,
+                        top = if (isSelected && hasSavedPlant) {
+                            actionSize * 0.35f
+                        } else {
+                            3.dp * contentScale
+                        },
                         bottom = 3.dp * contentScale
                     ),
                 horizontalAlignment = Alignment.CenterHorizontally,
@@ -737,7 +742,7 @@ private fun FarmTile(
             }
         }
 
-        if (isSelected) {
+        if (hasSavedPlant && isSelected) {
             TileActionButton(
                 modifier = Modifier
                     .align(Alignment.TopStart)
@@ -759,7 +764,7 @@ private fun FarmTile(
                 tint = TomatoRed,
                 onClick = onDelete
             )
-        } else if (notificationCount > 0) {
+        } else if (hasSavedPlant && notificationCount > 0) {
             Box(
                 modifier = Modifier
                     .align(Alignment.TopEnd)
@@ -1006,27 +1011,24 @@ fun TileNotificationDialog(
         formatScanDueLabel(scanCalendar.asOfIso())
     }
 
+    val cream = Color(0xFFF9F8F5)
+    val brickRed = Color(0xFFA32E27)
+    val dateRed = Color(0xFF95372C)
+    val charcoal = Color(0xFF1A2B34)
+    val panelFill = Color(0xFFF2EEE9)
+    val panelBorder = Color(0xFFE6E1DC)
+
     androidx.compose.ui.window.Dialog(onDismissRequest = onDismiss) {
-        Box(
-            modifier = Modifier
-                .fillMaxWidth()
-                .clip(RoundedCornerShape(28.dp))
-                .background(
-                    Brush.verticalGradient(
-                        colors = listOf(Color(0xFF2A1616), Color(0xFF1A1010))
-                    )
-                )
-                .border(
-                    width = 1.dp,
-                    brush = Brush.verticalGradient(
-                        colors = listOf(Color(0x66E53935), Color(0x00E53935))
-                    ),
-                    shape = RoundedCornerShape(28.dp)
-                )
-                .padding(horizontal = 22.dp, vertical = 26.dp)
+        Surface(
+            modifier = Modifier.fillMaxWidth(),
+            shape = RoundedCornerShape(28.dp),
+            color = cream,
+            shadowElevation = 8.dp
         ) {
             Column(
-                modifier = Modifier.fillMaxWidth(),
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .padding(horizontal = 22.dp, vertical = 26.dp),
                 horizontalAlignment = Alignment.CenterHorizontally
             ) {
                 Image(
@@ -1038,7 +1040,7 @@ fun TileNotificationDialog(
                 Spacer(modifier = Modifier.height(14.dp))
                 Text(
                     text = dateLabel,
-                    color = Color(0xFFE2BABA),
+                    color = dateRed,
                     fontSize = 11.sp,
                     fontWeight = FontWeight.Bold,
                     letterSpacing = 1.2.sp
@@ -1046,7 +1048,7 @@ fun TileNotificationDialog(
                 Spacer(modifier = Modifier.height(6.dp))
                 Text(
                     text = plant,
-                    color = Color.White,
+                    color = charcoal,
                     fontSize = 18.sp,
                     fontWeight = FontWeight.Bold,
                     textAlign = TextAlign.Center
@@ -1056,7 +1058,7 @@ fun TileNotificationDialog(
                 if (messages.isEmpty()) {
                     Text(
                         text = "No notifications for this plant right now.",
-                        color = Color(0xFFF0D4D4),
+                        color = charcoal.copy(alpha = 0.7f),
                         fontSize = 14.sp,
                         textAlign = TextAlign.Center,
                         lineHeight = 20.sp,
@@ -1072,7 +1074,8 @@ fun TileNotificationDialog(
                                 modifier = Modifier
                                     .fillMaxWidth()
                                     .clip(RoundedCornerShape(14.dp))
-                                    .background(Color(0x33E53935))
+                                    .background(panelFill)
+                                    .border(1.dp, panelBorder, RoundedCornerShape(14.dp))
                                     .padding(horizontal = 12.dp, vertical = 10.dp),
                                 verticalAlignment = Alignment.Top
                             ) {
@@ -1081,12 +1084,12 @@ fun TileNotificationDialog(
                                         .padding(top = 6.dp)
                                         .size(7.dp)
                                         .clip(CircleShape)
-                                        .background(Color(0xFFE53935))
+                                        .background(brickRed)
                                 )
                                 Spacer(modifier = Modifier.width(10.dp))
                                 Text(
                                     text = message,
-                                    color = Color(0xFFFFF5F5),
+                                    color = charcoal,
                                     fontSize = 14.sp,
                                     lineHeight = 20.sp,
                                     modifier = Modifier.weight(1f)
@@ -1103,27 +1106,15 @@ fun TileNotificationDialog(
                         .fillMaxWidth()
                         .height(48.dp),
                     shape = RoundedCornerShape(50),
-                    colors = ButtonDefaults.buttonColors(containerColor = Color.Transparent),
-                    contentPadding = PaddingValues()
+                    colors = ButtonDefaults.buttonColors(containerColor = brickRed),
+                    contentPadding = PaddingValues(horizontal = 20.dp, vertical = 12.dp)
                 ) {
-                    Box(
-                        modifier = Modifier
-                            .fillMaxSize()
-                            .background(
-                                Brush.horizontalGradient(
-                                    colors = listOf(Color(0xFFE53935), Color(0xFFB71C1C))
-                                ),
-                                shape = RoundedCornerShape(50)
-                            ),
-                        contentAlignment = Alignment.Center
-                    ) {
-                        Text(
-                            text = "Close",
-                            color = Color.White,
-                            fontWeight = FontWeight.Bold,
-                            fontSize = 15.sp
-                        )
-                    }
+                    Text(
+                        text = "Close",
+                        color = Color.White,
+                        fontWeight = FontWeight.Bold,
+                        fontSize = 15.sp
+                    )
                 }
             }
         }

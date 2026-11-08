@@ -9,7 +9,6 @@ import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.ArrowBack
 import androidx.compose.material.icons.filled.Add
-import androidx.compose.material.icons.filled.Edit
 import androidx.compose.material.icons.filled.Remove
 import androidx.compose.material3.*
 import androidx.compose.runtime.*
@@ -65,7 +64,6 @@ fun AddBlueprintScreen(
     occupiedTiles: Map<Int, String> = emptyMap()
 ) {
     val isExpanding = initialRows > 0 && initialColumns > 0
-    var farmName by remember { mutableStateOf("") }
     var rows by remember { mutableIntStateOf(if (isExpanding) initialRows else 3) }
     var columns by remember { mutableIntStateOf(if (isExpanding) initialColumns else 3) }
     var blockedMessage by remember { mutableStateOf<String?>(null) }
@@ -138,26 +136,6 @@ fun AddBlueprintScreen(
         )
 
         Spacer(modifier = Modifier.height(20.dp))
-
-        OutlinedTextField(
-            value = farmName,
-            onValueChange = { farmName = it },
-            label = { Text("Farm Name") },
-            placeholder = { Text("e.g. North Field Layout") },
-            leadingIcon = {
-                Icon(Icons.Default.Edit, contentDescription = null, tint = TomatoGreen)
-            },
-            modifier = Modifier.fillMaxWidth(),
-            shape = RoundedCornerShape(16.dp),
-            colors = OutlinedTextFieldDefaults.colors(
-                focusedContainerColor = Color.White,
-                unfocusedContainerColor = Color.White,
-                focusedBorderColor = TomatoGreen,
-                unfocusedBorderColor = Color(0xFFE0E0E0)
-            )
-        )
-
-        Spacer(modifier = Modifier.height(16.dp))
 
         Row(
             modifier = Modifier.fillMaxWidth(),

@@ -147,19 +147,34 @@ fun PlantInfoScreen(
                 } catch (e: Exception) {
                     if (!shouldUseOnDeviceLeafCheck(e, context)) throw e
                     withContext(Dispatchers.IO) {
-                        val leaf = OfflineLeafValidator.validate(context, bitmap)
+                        val prepared = ImageUploadHelper.bitmapForOnDeviceScan(bitmap)
+                        val leaf = OfflineLeafValidator.validate(context, prepared)
                         if (leaf.confirmsTomatoLeaf()) {
-                            OfflineDiseaseClassifier.classify(context, bitmap, leaf)
+                            OfflineDiseaseClassifier.classify(context, prepared, leaf)
                         } else {
                             leaf
                         }
                     }
                 }
-                validationResult = response
-                val leafOnly = response.stage == "offline" && !response.hasDiseaseResult
-                hasPendingSave = response.confirmsTomatoLeaf() && !leafOnly
-                showNotTomatoAlert = !response.isError && !response.confirmsTomatoLeaf()
-                Log.d("TomatoInsight", "Validation result=${response.result}, class=${response.detectedClass}")
+                // Disease bars always come from the same on-device TFLite, so online and
+                // offline scans of the same photo show the same health percentages.
+                val scored = if (response.confirmsTomatoLeaf()) {
+                    withContext(Dispatchers.IO) {
+                        val prepared = ImageUploadHelper.bitmapForOnDeviceScan(bitmap)
+                        OfflineDiseaseClassifier.classify(context, prepared, response)
+                    }
+                } else {
+                    response
+                }
+                validationResult = scored
+                val leafOnly = scored.stage == "offline" && !scored.hasDiseaseResult
+                hasPendingSave = scored.confirmsTomatoLeaf() && !leafOnly
+                showNotTomatoAlert = !scored.isError && !scored.confirmsTomatoLeaf()
+                Log.d(
+                    "TomatoInsight",
+                    "Validation result=${scored.result}, class=${scored.detectedClass}, " +
+                        "disease=${scored.topDisease} mode=${scored.inferenceMode}"
+                )
             } catch (e: kotlinx.coroutines.TimeoutCancellationException) {
                 Log.e("TomatoInsight", "Validation timed out", e)
                 validationError =
@@ -451,7 +466,7 @@ fun PlantInfoScreen(
                     .fillMaxWidth()
                     .height(imageHeight)
                     .graphicsLayer { translationY = -16f * imageCollapse },
-                shape = RoundedCornerShape(32.dp),
+                shape = RoundedCornerShape(20.dp),
                 color = Color(0xFFD9D9D9)
             ) {
                 Box(contentAlignment = Alignment.Center) {
@@ -542,7 +557,6 @@ fun PlantInfoScreen(
                         recommendationPendingSave &&
                         validationResult?.hasAiRecommendations == true &&
                         !isLoadingRecommendation
-                    // Keep Save Info under Health Status so long care guides don't hide it.
                     val showSaveInfo = tileNumber != null &&
                         !isValidating &&
                         (
@@ -551,149 +565,12 @@ fun PlantInfoScreen(
                                 (displayResult != null && (isSavedScan || validationResult != null || savedClassification))
                             )
 
-                    if (showSaveInfo) {
-                        if (canSave || canSaveRecommendation) {
-                            FilledTonalButton(
-                                onClick = {
-                                    if (isSavingInfo) return@FilledTonalButton
-                                    val result = validationResult ?: return@FilledTonalButton
-                                    val image = capturedImage
-                                    val recommendationOnly = canSaveRecommendation && !hasPendingSave
-                                    val name = plantNameInput.trim()
-                                    scope.launch {
-                                        isSavingInfo = true
-                                        val outcome = if (recommendationOnly) {
-                                            onRecommendationSaved(result)
-                                            recommendationPendingSave = false
-                                            snackbarHostState.showSnackbar(
-                                                "Recommendation saved for Tile $tileNumber"
-                                            )
-                                            ScanSaveOutcome.Saved
-                                        } else {
-                                            onResultSaved(result, image, name)
-                                        }
-                                        isSavingInfo = false
-                                        if (!recommendationOnly && outcome is ScanSaveOutcome.Saved) {
-                                            isSavedScan = true
-                                            hasPendingSave = false
-                                            recommendationPendingSave = false
-                                        } else if (outcome is ScanSaveOutcome.Blocked && outcome.code != "insufficient-credits") {
-                                            snackbarHostState.showSnackbar(outcome.message)
-                                        }
-                                    }
-                                },
-                                enabled = !isSavingInfo,
-                                modifier = Modifier
-                                    .fillMaxWidth()
-                                    .height(48.dp),
-                                shape = RoundedCornerShape(12.dp),
-                                colors = ButtonDefaults.filledTonalButtonColors(
-                                    containerColor = TomatoGreen.copy(alpha = 0.14f),
-                                    contentColor = TomatoGreenDark
-                                ),
-                                contentPadding = PaddingValues(horizontal = 20.dp, vertical = 12.dp)
-                            ) {
-                                Text(
-                                    text = when {
-                                        isSavingInfo -> "Saving..."
-                                        canSaveRecommendation && !hasPendingSave -> "Save recommendation"
-                                        else -> "Save Info"
-                                    },
-                                    fontWeight = FontWeight.Medium,
-                                    fontSize = 15.sp,
-                                    letterSpacing = 0.15.sp
-                                )
-                            }
-                        } else {
-                            Button(
-                                onClick = {},
-                                enabled = false,
-                                modifier = Modifier
-                                    .fillMaxWidth()
-                                    .height(48.dp),
-                                shape = RoundedCornerShape(12.dp),
-                                colors = ButtonDefaults.buttonColors(
-                                    disabledContainerColor = if (hasPlantName && (isSavedScan || !hasPendingSave)) {
-                                        TomatoGreen
-                                    } else {
-                                        Color(0xFFE0E0E0)
-                                    },
-                                    disabledContentColor = if (hasPlantName && (isSavedScan || !hasPendingSave)) {
-                                        Color.White
-                                    } else {
-                                        Color(0xFF757575)
-                                    }
-                                ),
-                                elevation = ButtonDefaults.buttonElevation(
-                                    defaultElevation = 0.dp,
-                                    pressedElevation = 0.dp,
-                                    disabledElevation = 0.dp
-                                ),
-                                contentPadding = PaddingValues(horizontal = 20.dp, vertical = 12.dp)
-                            ) {
-                                Text(
-                                    text = if (hasPlantName && (isSavedScan || !hasPendingSave)) {
-                                        "Saved Info"
-                                    } else {
-                                        "Save Info"
-                                    },
-                                    fontWeight = FontWeight.Medium,
-                                    fontSize = 15.sp,
-                                    letterSpacing = 0.15.sp
-                                )
-                            }
-                        }
-                        if (canSave) {
-                            Text(
-                                text = "Scan as many times as you need. Tap Save Info when you have a good result. That save uses 1 credit.",
-                                fontSize = 12.sp,
-                                color = Color.Gray,
-                                modifier = Modifier.padding(top = 8.dp)
-                            )
-                        } else if (!hasPlantName && (hasPendingSave || displayResult != null)) {
-                            Text(
-                                text = "Enter a plant name to save this scan.",
-                                fontSize = 12.sp,
-                                color = Color.Gray,
-                                modifier = Modifier.padding(top = 8.dp)
-                            )
-                        }
-                        Spacer(modifier = Modifier.height(12.dp))
-                    }
-
-                    if (capturedImage == null && validationResult == null && !savedClassification) {
-                        Box(modifier = Modifier.fillMaxWidth().height(180.dp), contentAlignment = Alignment.Center) {
-                            Text(
-                                "Take or upload a photo. Validation starts automatically.",
-                                color = Color.Gray,
-                                textAlign = TextAlign.Center
-                            )
-                        }
-                    } else {
+                    if (capturedImage != null || validationResult != null || savedClassification) {
                         Column(
                             modifier = Modifier
                                 .fillMaxWidth()
                                 .padding(vertical = 8.dp)
                         ) {
-                            if (isSavedScan && !hasPendingSave) {
-                                Text(
-                                    text = if (tileNumber != null) {
-                                        "Saved scan for Tile $tileNumber"
-                                    } else {
-                                        "Saved scan result"
-                                    },
-                                    fontSize = 13.sp,
-                                    fontWeight = FontWeight.Bold,
-                                    color = TomatoGreen
-                                )
-                                Text(
-                                    text = "Take or upload a new photo to rescan this tile.",
-                                    fontSize = 12.sp,
-                                    color = Color.Gray
-                                )
-                                Spacer(modifier = Modifier.height(12.dp))
-                            }
-
                             validationError?.let { error ->
                                 ValidationResultCard(
                                     title = "Connection Error",
@@ -813,6 +690,134 @@ fun PlantInfoScreen(
                                     }
                                 }
                             }
+                        }
+                    }
+
+                    if (showSaveInfo) {
+                        Spacer(modifier = Modifier.height(12.dp))
+                        if (canSave || canSaveRecommendation) {
+                            FilledTonalButton(
+                                onClick = {
+                                    if (isSavingInfo) return@FilledTonalButton
+                                    val result = validationResult ?: return@FilledTonalButton
+                                    val image = capturedImage
+                                    val recommendationOnly = canSaveRecommendation && !hasPendingSave
+                                    val name = plantNameInput.trim()
+                                    scope.launch {
+                                        isSavingInfo = true
+                                        val outcome = if (recommendationOnly) {
+                                            onRecommendationSaved(result)
+                                            recommendationPendingSave = false
+                                            snackbarHostState.showSnackbar(
+                                                "Recommendation saved for Tile $tileNumber"
+                                            )
+                                            ScanSaveOutcome.Saved
+                                        } else {
+                                            onResultSaved(result, image, name)
+                                        }
+                                        isSavingInfo = false
+                                        if (!recommendationOnly && outcome is ScanSaveOutcome.Saved) {
+                                            isSavedScan = true
+                                            hasPendingSave = false
+                                            recommendationPendingSave = false
+                                        } else if (outcome is ScanSaveOutcome.Blocked && outcome.code != "insufficient-credits") {
+                                            snackbarHostState.showSnackbar(outcome.message)
+                                        }
+                                    }
+                                },
+                                enabled = !isSavingInfo,
+                                modifier = Modifier
+                                    .fillMaxWidth()
+                                    .height(48.dp),
+                                shape = RoundedCornerShape(12.dp),
+                                colors = ButtonDefaults.filledTonalButtonColors(
+                                    containerColor = TomatoGreen.copy(alpha = 0.14f),
+                                    contentColor = TomatoGreenDark
+                                ),
+                                contentPadding = PaddingValues(horizontal = 20.dp, vertical = 12.dp)
+                            ) {
+                                Text(
+                                    text = when {
+                                        isSavingInfo -> "Saving..."
+                                        canSaveRecommendation && !hasPendingSave -> "Save recommendation"
+                                        else -> "Save Info"
+                                    },
+                                    fontWeight = FontWeight.Medium,
+                                    fontSize = 15.sp,
+                                    letterSpacing = 0.15.sp
+                                )
+                            }
+                        } else {
+                            Button(
+                                onClick = {},
+                                enabled = false,
+                                modifier = Modifier
+                                    .fillMaxWidth()
+                                    .height(48.dp),
+                                shape = RoundedCornerShape(12.dp),
+                                colors = ButtonDefaults.buttonColors(
+                                    disabledContainerColor = if (hasPlantName && (isSavedScan || !hasPendingSave)) {
+                                        TomatoGreen
+                                    } else {
+                                        Color(0xFFE0E0E0)
+                                    },
+                                    disabledContentColor = if (hasPlantName && (isSavedScan || !hasPendingSave)) {
+                                        Color.White
+                                    } else {
+                                        Color(0xFF757575)
+                                    }
+                                ),
+                                elevation = ButtonDefaults.buttonElevation(
+                                    defaultElevation = 0.dp,
+                                    pressedElevation = 0.dp,
+                                    disabledElevation = 0.dp
+                                ),
+                                contentPadding = PaddingValues(horizontal = 20.dp, vertical = 12.dp)
+                            ) {
+                                Text(
+                                    text = if (hasPlantName && (isSavedScan || !hasPendingSave)) {
+                                        "Saved Info"
+                                    } else {
+                                        "Save Info"
+                                    },
+                                    fontWeight = FontWeight.Medium,
+                                    fontSize = 15.sp,
+                                    letterSpacing = 0.15.sp
+                                )
+                            }
+                        }
+                        if (canSave) {
+                            Text(
+                                text = "Scan as many times as you need. Tap Save Info when you have a good result. That save uses 1 credit.",
+                                fontSize = 12.sp,
+                                color = Color.Gray,
+                                modifier = Modifier.padding(top = 8.dp)
+                            )
+                        } else if (!hasPlantName && (hasPendingSave || displayResult != null)) {
+                            Text(
+                                text = "Enter a plant name to save this scan.",
+                                fontSize = 12.sp,
+                                color = Color.Gray,
+                                modifier = Modifier.padding(top = 8.dp)
+                            )
+                        }
+                        if (isSavedScan && !hasPendingSave) {
+                            Spacer(modifier = Modifier.height(8.dp))
+                            Text(
+                                text = if (tileNumber != null) {
+                                    "Saved scan for Tile $tileNumber"
+                                } else {
+                                    "Saved scan result"
+                                },
+                                fontSize = 13.sp,
+                                fontWeight = FontWeight.Bold,
+                                color = TomatoGreen
+                            )
+                            Text(
+                                text = "Take or upload a new photo to rescan this tile.",
+                                fontSize = 12.sp,
+                                color = Color.Gray
+                            )
                         }
                     }
 

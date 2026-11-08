@@ -19,6 +19,15 @@ private const val REMINDER_REQUEST = 41
 private const val PREFS = "scan_reminders"
 private const val SHOWN_SIGNATURE = "shown_signature"
 
+/** Clears shared reminder prefs so a new account never inherits another user's due signature. */
+fun clearScanReminderCache(context: Context) {
+    val alarm = context.getSystemService(AlarmManager::class.java)
+    runCatching {
+        alarm?.cancel(reminderPending(context, "", "", ""))
+    }
+    context.getSharedPreferences(PREFS, Context.MODE_PRIVATE).edit().clear().apply()
+}
+
 /**
  * Shows or schedules the “this week needs a scan” phone notification.
  * Due tiles use the same per-plant rules as the website (`reminderWeekForPlant`).

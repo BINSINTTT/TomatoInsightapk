@@ -1,17 +1,27 @@
 package com.tomatoinsight.ml
 
 import android.graphics.Bitmap
+import android.graphics.Canvas
+import android.graphics.Color
+import android.graphics.Paint
+import android.graphics.Rect
+import org.tensorflow.lite.Interpreter
 import java.nio.ByteBuffer
 import java.nio.ByteOrder
 import kotlin.math.min
 import kotlin.math.roundToInt
 
-/** RGB 0–1, channels-first input used by both Ultralytics classifiers. */
+/**
+ * RGB 0–1, channels-first input used by both Ultralytics classifiers.
+ *
+ * Uses ClassifyLetterBox (pad 114): same full-frame resize/pad Ultralytics applies
+ * when Deploy is called with imgsz, so on-device pixels stay closer to the cloud path.
+ */
 internal fun bitmapToNchw(bitmap: Bitmap, size: Int): ByteBuffer {
-    val cropped = centerCrop(bitmap, size)
+    val squared = ultralyticsLetterBox(bitmap, size)
     val pixels = IntArray(size * size)
-    cropped.getPixels(pixels, 0, size, 0, 0, size, size)
-    if (cropped !== bitmap) cropped.recycle()
+    squared.getPixels(pixels, 0, size, 0, 0, size, size)
+    if (squared !== bitmap) squared.recycle()
 
     val buffer = ByteBuffer.allocateDirect(1 * 3 * size * size * 4)
     buffer.order(ByteOrder.nativeOrder())
@@ -30,30 +40,56 @@ internal fun bitmapToNchw(bitmap: Bitmap, size: Int): ByteBuffer {
     return buffer
 }
 
-private fun centerCrop(source: Bitmap, size: Int): Bitmap {
+/** Read imgsz from the loaded TFLite input tensor ([1,3,H,W] or [1,H,W,3]). */
+internal fun Interpreter.inputImageSize(fallback: Int): Int {
+    val shape = getInputTensor(0).shape()
+    if (shape.size != 4) return fallback
+    return when {
+        shape[1] == 3 -> shape[2].coerceAtLeast(1) // NCHW
+        shape[3] == 3 -> shape[1].coerceAtLeast(1) // NHWC
+        else -> fallback
+    }
+}
+
+/**
+ * Ultralytics ClassifyLetterBox: aspect-preserving resize, pad to size×size with 114.
+ * See ultralytics.data.augment.ClassifyLetterBox.
+ */
+private fun ultralyticsLetterBox(source: Bitmap, size: Int): Bitmap {
     val argb = if (source.config == Bitmap.Config.ARGB_8888) {
         source
     } else {
         source.copy(Bitmap.Config.ARGB_8888, false)
     }
-    val scale = size.toFloat() / min(argb.width, argb.height).coerceAtLeast(1)
-    val scaledWidth = (argb.width * scale).roundToInt().coerceAtLeast(size)
-    val scaledHeight = (argb.height * scale).roundToInt().coerceAtLeast(size)
-    val scaled = if (scaledWidth == argb.width && scaledHeight == argb.height) {
+    val imh = argb.height.coerceAtLeast(1)
+    val imw = argb.width.coerceAtLeast(1)
+    val scale = min(size.toFloat() / imh, size.toFloat() / imw)
+    val resizedH = (imh * scale).roundToInt().coerceAtLeast(1)
+    val resizedW = (imw * scale).roundToInt().coerceAtLeast(1)
+    val resized = if (resizedW == imw && resizedH == imh) {
         argb
     } else {
-        Bitmap.createScaledBitmap(argb, scaledWidth, scaledHeight, true)
+        Bitmap.createScaledBitmap(argb, resizedW, resizedH, true)
     }
-    val x = ((scaled.width - size) / 2).coerceAtLeast(0)
-    val y = ((scaled.height - size) / 2).coerceAtLeast(0)
-    val cropWidth = min(size, scaled.width)
-    val cropHeight = min(size, scaled.height)
-    val cropped = if (x == 0 && y == 0 && cropWidth == scaled.width && cropHeight == scaled.height) {
-        scaled
-    } else {
-        Bitmap.createBitmap(scaled, x, y, cropWidth, cropHeight)
+
+    if (resizedW == size && resizedH == size) {
+        if (argb !== source && argb !== resized) argb.recycle()
+        return resized
     }
-    if (scaled !== argb && scaled !== cropped) scaled.recycle()
-    if (argb !== source && argb !== cropped) argb.recycle()
-    return cropped
+
+    val out = Bitmap.createBitmap(size, size, Bitmap.Config.ARGB_8888)
+    val canvas = Canvas(out)
+    // Ultralytics pad value 114 on RGB → #727272
+    canvas.drawColor(Color.rgb(114, 114, 114))
+    val left = ((size - resizedW) / 2f - 0.1f).roundToInt().coerceAtLeast(0)
+    val top = ((size - resizedH) / 2f - 0.1f).roundToInt().coerceAtLeast(0)
+    canvas.drawBitmap(
+        resized,
+        Rect(0, 0, resizedW, resizedH),
+        Rect(left, top, left + resizedW, top + resizedH),
+        Paint(Paint.FILTER_BITMAP_FLAG)
+    )
+    if (resized !== argb && resized !== out) resized.recycle()
+    if (argb !== source && argb !== out) argb.recycle()
+    return out
 }

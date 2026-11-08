@@ -128,6 +128,12 @@ fun LoginScreen(
                                 else -> {
                                     val msg = exception?.message ?: ""
                                     when {
+                                        msg.contains("network error", ignoreCase = true) ||
+                                            msg.contains("timeout", ignoreCase = true) ||
+                                            msg.contains("unreachable host", ignoreCase = true) ||
+                                            msg.contains("interrupted connection", ignoreCase = true) ||
+                                            msg.contains("Unable to resolve host", ignoreCase = true) ->
+                                            "Can't log in. Check your internet connection"
                                         msg.contains("user-not-found", ignoreCase = true) ||
                                             msg.contains("no user record", ignoreCase = true) ->
                                             "This email is not registered. Please sign up first."
@@ -216,15 +222,42 @@ private fun ForgotPasswordDialog(
 
                     isSending = true
                     dialogError = null
-                    auth.sendPasswordResetEmail(trimmed)
-                        .addOnCompleteListener { task ->
-                            isSending = false
-                            if (task.isSuccessful) {
-                                onResetSent("Password reset link sent to $trimmed. Check your inbox.")
-                            } else {
-                                dialogError = task.exception?.localizedMessage
-                                    ?: "Could not send reset email. Please try again."
+                    auth.fetchSignInMethodsForEmail(trimmed)
+                        .addOnCompleteListener { methodsTask ->
+                            if (!methodsTask.isSuccessful) {
+                                isSending = false
+                                val msg = methodsTask.exception?.message.orEmpty()
+                                dialogError = when {
+                                    msg.contains("network error", ignoreCase = true) ||
+                                        msg.contains("timeout", ignoreCase = true) ||
+                                        msg.contains("unreachable host", ignoreCase = true) ->
+                                        "Can't reset password. Check your internet connection"
+                                    else -> methodsTask.exception?.localizedMessage
+                                        ?: "Could not verify email. Please try again."
+                                }
+                                return@addOnCompleteListener
                             }
+                            val methods = methodsTask.result?.signInMethods.orEmpty()
+                            if (methods.isEmpty()) {
+                                isSending = false
+                                dialogError = "This email is not registered."
+                                return@addOnCompleteListener
+                            }
+                            auth.sendPasswordResetEmail(trimmed)
+                                .addOnCompleteListener { task ->
+                                    isSending = false
+                                    if (task.isSuccessful) {
+                                        onResetSent("Password reset link sent to $trimmed. Check your inbox.")
+                                    } else {
+                                        val exception = task.exception
+                                        dialogError = when (exception) {
+                                            is FirebaseAuthInvalidUserException ->
+                                                "This email is not registered."
+                                            else -> exception?.localizedMessage
+                                                ?: "Could not send reset email. Please try again."
+                                        }
+                                    }
+                                }
                         }
                 },
                 enabled = !isSending

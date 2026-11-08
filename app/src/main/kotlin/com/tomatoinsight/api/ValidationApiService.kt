@@ -220,8 +220,8 @@ fun diseaseAbbreviation(name: String): String = when {
 
 fun diseaseSeverityLabel(name: String, confidencePercent: Int): String = when {
     name.equals("Healthy", ignoreCase = true) -> "Healthy"
-    confidencePercent >= 80 -> "Severe"
-    confidencePercent >= 50 -> "Moderate"
+    confidencePercent >= 67 -> "Severe"
+    confidencePercent >= 34 -> "Moderate"
     else -> "Mild"
 }
 

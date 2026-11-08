@@ -12,7 +12,7 @@ import kotlin.math.roundToInt
  * On-device tomato-leaf check.
  *
  * capturevalidation.tflite is an Ultralytics classifier:
- * input float32 [1, 3, 224, 224] (RGB, 0–1, channels first),
+ * input float32 [1, 3, 640, 640] (RGB, 0–1, channels first),
  * output float32 [1, 2] or [1, 3] after softmax.
  *
  * The file does not store class names. Indexes follow Ultralytics' sorted
@@ -22,7 +22,7 @@ import kotlin.math.roundToInt
 object OfflineLeafValidator {
 
     private const val MODEL_ASSET = "models/capturevalidation.tflite"
-    private const val IMAGE_SIZE = 224
+    private const val IMAGE_SIZE = 640
     private const val MIN_CONFIDENCE = 0.50f
 
     /** Ultralytics sorts training folders alphabetically: NonTomatoLeaf, TomatoLeaf. */
@@ -37,7 +37,8 @@ object OfflineLeafValidator {
             val runner = interpreter ?: createInterpreter(context).also { interpreter = it }
             val classCount = runner.getOutputTensor(0).shape().last().coerceAtLeast(1)
             val output = Array(1) { FloatArray(classCount) }
-            runner.run(bitmapToNchw(bitmap, IMAGE_SIZE), output)
+            val imgsz = runner.inputImageSize(IMAGE_SIZE)
+            runner.run(bitmapToNchw(bitmap, imgsz), output)
             output[0]
         }
         return toResponse(scores)

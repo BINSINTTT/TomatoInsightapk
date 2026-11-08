@@ -40,6 +40,7 @@ import androidx.compose.material3.Scaffold
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableIntStateOf
 import androidx.compose.runtime.mutableStateOf
@@ -67,6 +68,7 @@ import com.tomatoinsight.data.FIRST_FARM_WEEK
 import com.tomatoinsight.data.FarmerProfile
 import com.tomatoinsight.data.LAST_FARM_WEEK
 import com.tomatoinsight.data.ScanCalendar
+import com.tomatoinsight.data.parseProfileName
 import com.tomatoinsight.ui.components.ConnectionStatusIndicator
 import com.tomatoinsight.ui.components.CustomBottomBar
 import com.tomatoinsight.ui.components.InternetConnectionNotice
@@ -117,10 +119,23 @@ fun ProfileScreen(
     val tileCount = if (farmRows > 0 && farmColumns > 0) farmRows * farmColumns else 0
     val weekLabel = if (selectedFarmWeek in FIRST_FARM_WEEK..LAST_FARM_WEEK) selectedFarmWeek else null
 
-    var firstName by remember(farmerProfile) { mutableStateOf(farmerProfile.firstName) }
-    var middleInitial by remember(farmerProfile) { mutableStateOf(farmerProfile.middleInitial) }
-    var lastName by remember(farmerProfile) { mutableStateOf(farmerProfile.lastName) }
-    var farmName by remember(farmerProfile) { mutableStateOf(farmerProfile.farmName) }
+    val authNameParts = remember(user?.displayName) {
+        parseProfileName(user?.displayName)
+    }
+    var firstName by remember {
+        mutableStateOf(farmerProfile.firstName.ifBlank { authNameParts.firstName })
+    }
+    var middleInitial by remember {
+        mutableStateOf(
+            farmerProfile.middleInitial.ifBlank {
+                authNameParts.middleName.trim().uppercase().take(1)
+            }
+        )
+    }
+    var lastName by remember {
+        mutableStateOf(farmerProfile.lastName.ifBlank { authNameParts.lastName })
+    }
+    var farmName by remember { mutableStateOf(farmerProfile.farmName) }
     var formError by remember { mutableStateOf<String?>(null) }
     var formSuccess by remember { mutableStateOf<String?>(null) }
     var photoStatus by remember { mutableStateOf<String?>(null) }
@@ -135,6 +150,34 @@ fun ProfileScreen(
     var year by remember { mutableIntStateOf(Calendar.getInstance().get(Calendar.YEAR)) }
     var month by remember { mutableIntStateOf(Calendar.getInstance().get(Calendar.MONTH)) }
 
+    // Accept richer profile updates; never wipe filled Basic information with blanks.
+    LaunchedEffect(
+        farmerProfile.firstName,
+        farmerProfile.middleInitial,
+        farmerProfile.lastName,
+        farmerProfile.farmName,
+        authNameParts
+    ) {
+        if (farmerProfile.firstName.isNotBlank()) {
+            firstName = farmerProfile.firstName
+        } else if (firstName.isBlank() && authNameParts.firstName.isNotBlank()) {
+            firstName = authNameParts.firstName
+        }
+        if (farmerProfile.middleInitial.isNotBlank()) {
+            middleInitial = farmerProfile.middleInitial
+        } else if (middleInitial.isBlank() && authNameParts.middleName.isNotBlank()) {
+            middleInitial = authNameParts.middleName.trim().uppercase().take(1)
+        }
+        if (farmerProfile.lastName.isNotBlank()) {
+            lastName = farmerProfile.lastName
+        } else if (lastName.isBlank() && authNameParts.lastName.isNotBlank()) {
+            lastName = authNameParts.lastName
+        }
+        if (farmerProfile.farmName.isNotBlank()) {
+            farmName = farmerProfile.farmName
+        }
+    }
+
     val photoPicker = rememberLauncherForActivityResult(ActivityResultContracts.GetContent()) { uri ->
         if (uri == null) return@rememberLauncherForActivityResult
         val bitmap = runCatching { decodeProfilePhoto(context, uri) }.getOrNull()
@@ -146,7 +189,17 @@ fun ProfileScreen(
         photoStatusOk = true
         photoStatus = "Saving photo…"
         scope.launch {
-            val result = onProfileSaved(farmerProfile.copy(photo = bitmap), true)
+            val result = onProfileSaved(
+                farmerProfile.copy(
+                    firstName = firstName.trim(),
+                    middleInitial = middleInitial.trim().uppercase().take(1),
+                    lastName = lastName.trim(),
+                    farmName = farmName.trim(),
+                    email = email,
+                    photo = bitmap
+                ),
+                true
+            )
             photoStatusOk = result.ok
             photoStatus = result.message
         }
@@ -256,7 +309,17 @@ fun ProfileScreen(
                             TextButton(onClick = {
                                 photoStatus = "Removing photo…"
                                 scope.launch {
-                                    val result = onProfileSaved(farmerProfile.copy(photo = null), true)
+                                    val result = onProfileSaved(
+                                        farmerProfile.copy(
+                                            firstName = firstName.trim(),
+                                            middleInitial = middleInitial.trim().uppercase().take(1),
+                                            lastName = lastName.trim(),
+                                            farmName = farmName.trim(),
+                                            email = email,
+                                            photo = null
+                                        ),
+                                        true
+                                    )
                                     photoStatusOk = result.ok
                                     photoStatus = if (result.ok) "Photo removed." else result.message
                                 }

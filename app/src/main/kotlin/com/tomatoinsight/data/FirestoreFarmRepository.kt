@@ -264,15 +264,23 @@ class FirestoreFarmRepository {
     ) = withContext(Dispatchers.IO) {
         val userRef = FirebaseFirestore.getInstance().collection("users").document(uid)
         val fields = mutableMapOf<String, Any>(
-            "firstName" to profile.firstName.trim(),
-            "middleInitial" to profile.middleInitial.trim().uppercase().take(1),
-            "lastName" to profile.lastName.trim(),
-            "farmName" to profile.farmName.trim(),
-            "email" to profile.email.trim(),
             "updatedAt" to isoTimestamp(System.currentTimeMillis())
         )
         if (includePhoto) {
+            // Photo-only saves must not blank out names already stored in Firestore.
+            profile.firstName.trim().takeIf { it.isNotEmpty() }?.let { fields["firstName"] = it }
+            profile.middleInitial.trim().uppercase().take(1).takeIf { it.isNotEmpty() }
+                ?.let { fields["middleInitial"] = it }
+            profile.lastName.trim().takeIf { it.isNotEmpty() }?.let { fields["lastName"] = it }
+            profile.farmName.trim().takeIf { it.isNotEmpty() }?.let { fields["farmName"] = it }
+            profile.email.trim().takeIf { it.isNotEmpty() }?.let { fields["email"] = it }
             fields["photo"] = profile.photo?.toProfilePhotoDataUrl().orEmpty()
+        } else {
+            fields["firstName"] = profile.firstName.trim()
+            fields["middleInitial"] = profile.middleInitial.trim().uppercase().take(1)
+            fields["lastName"] = profile.lastName.trim()
+            fields["farmName"] = profile.farmName.trim()
+            fields["email"] = profile.email.trim()
         }
         Tasks.await(userRef.set(fields, SetOptions.merge()))
     }

@@ -2,6 +2,7 @@ package com.tomatoinsight.api
 
 import android.content.Context
 import android.graphics.Bitmap
+import android.graphics.BitmapFactory
 import android.util.Log
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.withContext
@@ -27,6 +28,16 @@ object ImageUploadHelper {
             Log.d(TAG, "Upload size: ${imageBytes.size / 1024} KB")
             WebsiteScanClient.scan(imageBytes)
         }
+
+    /**
+     * Same JPEG encode/decode the online path uses, so offline TFLite sees
+     * pixels closer to what Ultralytics Deploy receives.
+     */
+    fun bitmapForOnDeviceScan(bitmap: Bitmap): Bitmap {
+        val bytes = prepareImageBytes(bitmap)
+        return BitmapFactory.decodeByteArray(bytes, 0, bytes.size)
+            ?: bitmap.copy(Bitmap.Config.ARGB_8888, false)
+    }
 
     private fun prepareImageBytes(bitmap: Bitmap): ByteArray {
         val scaled = scaleBitmap(bitmap, MAX_IMAGE_SIZE)

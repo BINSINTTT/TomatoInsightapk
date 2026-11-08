@@ -26,3 +26,30 @@ fun parseProfileName(displayName: String?): ProfileNameParts {
         )
     }
 }
+
+/** Prefer non-blank cloud fields without wiping filled local profile values. */
+fun mergeFarmerProfiles(local: FarmerProfile, cloud: FarmerProfile): FarmerProfile {
+    return FarmerProfile(
+        firstName = cloud.firstName.trim().ifBlank { local.firstName.trim() },
+        middleInitial = cloud.middleInitial.trim().ifBlank { local.middleInitial.trim() }
+            .uppercase()
+            .take(1),
+        lastName = cloud.lastName.trim().ifBlank { local.lastName.trim() },
+        farmName = cloud.farmName.trim().ifBlank { local.farmName.trim() },
+        email = cloud.email.trim().ifBlank { local.email.trim() },
+        photo = cloud.photo ?: local.photo
+    )
+}
+
+/** Fill blank name/email from Firebase Auth when Firestore profile is still empty. */
+fun FarmerProfile.withAuthFallback(displayName: String?, email: String?): FarmerProfile {
+    val parsed = parseProfileName(displayName)
+    return copy(
+        firstName = firstName.trim().ifBlank { parsed.firstName },
+        middleInitial = middleInitial.trim().ifBlank {
+            parsed.middleName.trim().uppercase().take(1)
+        },
+        lastName = lastName.trim().ifBlank { parsed.lastName },
+        email = this.email.trim().ifBlank { email?.trim().orEmpty() }
+    )
+}

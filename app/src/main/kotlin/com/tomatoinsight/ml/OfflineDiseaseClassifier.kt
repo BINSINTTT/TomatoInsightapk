@@ -12,7 +12,7 @@ import java.nio.channels.FileChannel
  * On-device disease check. Runs only after the leaf validator accepts the photo.
  *
  * tomatoinsightdiseaseclassification.tflite is an Ultralytics classifier:
- * input float32 [1, 3, 224, 224], output float32 [1, 4] after softmax.
+ * input float32 [1, 3, 640, 640], output float32 [1, 4] after softmax.
  *
  * Class indexes follow Ultralytics' alphabetical training-folder order.
  * Change [CLASS_NAMES] if a known disease scores on the wrong row.
@@ -20,7 +20,7 @@ import java.nio.channels.FileChannel
 object OfflineDiseaseClassifier {
 
     private const val MODEL_ASSET = "models/tomatoinsightdiseaseclassification.tflite"
-    private const val IMAGE_SIZE = 224
+    private const val IMAGE_SIZE = 640
 
     private val CLASS_NAMES = listOf(
         "Early blight",
@@ -37,7 +37,8 @@ object OfflineDiseaseClassifier {
             val runner = interpreter ?: createInterpreter(context).also { interpreter = it }
             val classCount = runner.getOutputTensor(0).shape().last().coerceAtLeast(1)
             val output = Array(1) { FloatArray(classCount) }
-            runner.run(bitmapToNchw(bitmap, IMAGE_SIZE), output)
+            val imgsz = runner.inputImageSize(IMAGE_SIZE)
+            runner.run(bitmapToNchw(bitmap, imgsz), output)
             output[0]
         }
         val predictions = scores.mapIndexed { index, score ->
@@ -47,18 +48,23 @@ object OfflineDiseaseClassifier {
             )
         }
         val top = predictions.maxByOrNull { it.confidence ?: 0.0 }
+        val keptOnlineCare = leaf.aiRecommendations != null
         return leaf.copy(
             predictions = predictions,
             topDisease = top?.displayName,
             topDiseaseConfidence = top?.confidence,
             diseaseClasses = predictions.mapNotNull { it.displayName },
-            stage = "offline",
+            // Keep website/offline stage from the leaf check; disease scores always come from TFLite.
             inferenceMode = "tflite",
             modelPath = MODEL_ASSET,
-            message = "Classified on this phone. Care tips below cover every detected score; online AI can refine them.",
-            aiRecommendations = null,
-            aiRecommendationError = null,
-            recommendationSource = "rules"
+            message = if (keptOnlineCare) {
+                leaf.message ?: "Tomato leaf detected."
+            } else {
+                "Classified on this phone. Care tips below cover every detected score; online AI can refine them."
+            },
+            aiRecommendations = leaf.aiRecommendations,
+            aiRecommendationError = leaf.aiRecommendationError,
+            recommendationSource = leaf.recommendationSource ?: "rules"
         ).ensureGuidesForAllDetections()
     }
 

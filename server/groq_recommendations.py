@@ -154,9 +154,9 @@ def _find_top(scores: dict[str, float]) -> dict[str, Any] | None:
 def _severity_label(bar_key: str, pct: float) -> str:
     if bar_key == "healthy":
         return "Healthy"
-    if pct >= 80:
+    if pct >= 67:
         return "Severe"
-    if pct >= 50:
+    if pct >= 34:
         return "Moderate"
     return "Mild"
 

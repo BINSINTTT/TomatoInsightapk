@@ -55,6 +55,7 @@ import com.tomatoinsight.data.CreditRepository
 import com.tomatoinsight.data.FIRST_FARM_WEEK
 import com.tomatoinsight.data.LAST_FARM_WEEK
 import com.tomatoinsight.data.MAX_SAVED_WEEKS
+import com.tomatoinsight.data.FarmAccountIsolation
 import com.tomatoinsight.data.FarmDeletion
 import com.tomatoinsight.data.FarmerProfile
 import com.tomatoinsight.data.FirestoreFarmRepository
@@ -75,11 +76,13 @@ import com.tomatoinsight.data.asOfIso
 import com.tomatoinsight.data.keepLivePlants
 import com.tomatoinsight.data.keepOfflineOnlyPlants
 import com.tomatoinsight.data.mergeDeletions
+import com.tomatoinsight.data.mergeFarmerProfiles
 import com.tomatoinsight.data.mergePlantNames
 import com.tomatoinsight.data.mergeRecommendations
 import com.tomatoinsight.data.mergeScanHistories
 import com.tomatoinsight.data.toTileScanResult
 import com.tomatoinsight.data.todayIsoLocal
+import com.tomatoinsight.data.withAuthFallback
 import com.tomatoinsight.ui.components.CreditToast
 import com.tomatoinsight.ui.components.CreditToastHost
 import com.tomatoinsight.ui.components.DemoCheckoutDialog
@@ -387,7 +390,14 @@ fun TomatoInsightApp() {
         cloudError = null
         farmLoading = currentUserId != null
 
-        val userId = currentUserId ?: return@LaunchedEffect
+        val userId = currentUserId
+        if (userId == null) {
+            FarmAccountIsolation.onSignedOut(context)
+            return@LaunchedEffect
+        }
+        // Drop shared reminder cache if another account still owned this device session.
+        FarmAccountIsolation.discardForeignSharedCache(context, userId)
+
         val loaded = farmRepository.loadForUser(userId)
         val localHistory = loaded.history
         val localRows = loaded.rows
@@ -399,6 +409,8 @@ fun TomatoInsightApp() {
         }
         plantNames = loaded.plantNames
         farmDeletions = loaded.deletions
+        // Tag this uid as owner after loading its Room rows (before any cloud upload).
+        FarmAccountIsolation.claimOwner(context, userId)
 
         firestoreFarmRepository.observe(userId).collect { update ->
             cloudError = update.error
@@ -462,10 +474,13 @@ fun TomatoInsightApp() {
             plantNames = keptNames
             plantRecommendations = mergedRecommendations
             farmDeletions = mergedDeletions
-            if (farm.profile.displayName.isNotBlank() || farm.profile.farmName.isNotBlank() ||
-                farm.profile.photo != null
+            val authUser = auth.currentUser
+            val mergedProfile = mergeFarmerProfiles(syncProfile, farm.profile)
+                .withAuthFallback(authUser?.displayName, authUser?.email)
+            if (mergedProfile.displayName.isNotBlank() || mergedProfile.farmName.isNotBlank() ||
+                mergedProfile.photo != null || mergedProfile.email.isNotBlank()
             ) {
-                farmerProfile = farm.profile
+                farmerProfile = mergedProfile
             }
             if (farm.selectedFarmWeek in FIRST_FARM_WEEK..LAST_FARM_WEEK) {
                 selectedFarmWeek = farm.selectedFarmWeek
@@ -496,6 +511,7 @@ fun TomatoInsightApp() {
                 plantNames = plantNames,
                 deletions = farmDeletions
             )
+            FarmAccountIsolation.claimOwner(context, userId)
             refreshScanReminder(
                 context,
                 scanCalendar,
@@ -591,6 +607,12 @@ fun TomatoInsightApp() {
                 waitedMs += 50
             }
             if (restored) syncPhase = FarmSyncPhase.Syncing
+            // Never push another account's leftover in-memory/local farm into this uid.
+            if (!FarmAccountIsolation.mayUploadLocalFarm(context, uid)) {
+                FarmAccountIsolation.discardForeignSharedCache(context, uid)
+                syncPhase = FarmSyncPhase.Idle
+                return@collect
+            }
             val disk = runCatching { farmRepository.loadForUser(uid) }.getOrNull()
             val pendingDeletions = mergeDeletions(syncDeletions, disk?.deletions.orEmpty())
             val memoryHistory = syncHistory.mapValues { it.value.toList() }
@@ -655,6 +677,9 @@ fun TomatoInsightApp() {
                 )
             }
             val farmSynced = runCatching {
+                if (!FarmAccountIsolation.mayUploadLocalFarm(context, uid)) {
+                    error("Farm cache is not owned by the signed-in account.")
+                }
                 firestoreFarmRepository.syncLocalFarm(
                     uid = uid,
                     rows = rows,
@@ -666,6 +691,8 @@ fun TomatoInsightApp() {
                     week = syncWeek,
                     deletions = allDeletions.filter { it.tileNumber in deletedTiles }
                 )
+            }.onSuccess {
+                FarmAccountIsolation.claimOwner(context, uid)
             }
             val creditsSynced = runCatching { creditRepository.applyPendingSpends(uid) }
             creditsSynced.getOrNull()?.let { accountCredits = it.account }
@@ -940,13 +967,18 @@ fun TomatoInsightApp() {
                 onOpenCreditPlans = { navController.navigate("plans") },
                 onProfileSaved = { profile, includePhoto ->
                     val keptPhoto = if (includePhoto) profile.photo else farmerProfile.photo
-                    val next = profile.copy(photo = keptPhoto)
+                    val next = mergeFarmerProfiles(
+                        farmerProfile,
+                        profile.copy(photo = keptPhoto)
+                    ).copy(photo = keptPhoto)
                     farmerProfile = next
-                    auth.currentUser?.updateProfile(
-                        UserProfileChangeRequest.Builder()
-                            .setDisplayName(next.displayName)
-                            .build()
-                    )
+                    if (next.displayName.isNotBlank()) {
+                        auth.currentUser?.updateProfile(
+                            UserProfileChangeRequest.Builder()
+                                .setDisplayName(next.displayName)
+                                .build()
+                        )
+                    }
                     val userId = currentUserId
                         ?: return@ProfileScreen ProfileSaveResult(
                             true,

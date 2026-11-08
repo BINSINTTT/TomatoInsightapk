@@ -8,21 +8,30 @@ import androidx.compose.runtime.Composable
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
+import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import com.google.firebase.auth.FirebaseAuth
 import com.google.firebase.auth.UserProfileChangeRequest
+import com.tomatoinsight.data.FarmAccountIsolation
+import com.tomatoinsight.data.FarmerProfile
+import com.tomatoinsight.data.FirestoreFarmRepository
+import com.tomatoinsight.data.UserFarmRepository
 import com.tomatoinsight.util.PASSWORD_REQUIREMENTS_HINT
 import com.tomatoinsight.util.passwordValidationError
+import kotlinx.coroutines.launch
 
 @Composable
 fun SignupScreen(
     onSignupSuccess: () -> Unit,
     onNavigateToLogin: () -> Unit
 ) {
+    val context = LocalContext.current
+    val scope = rememberCoroutineScope()
     var firstName by remember { mutableStateOf("") }
     var middleName by remember { mutableStateOf("") }
     var lastName by remember { mutableStateOf("") }
@@ -137,18 +146,54 @@ fun SignupScreen(
                                 .addOnCompleteListener { task ->
                                     if (task.isSuccessful) {
                                         val user = auth.currentUser
+                                        val uid = user?.uid.orEmpty()
                                         val fullName = listOf(firstName, middleName, lastName)
                                             .filter { it.isNotBlank() }
                                             .joinToString(" ")
                                         val profileUpdates = UserProfileChangeRequest.Builder()
                                             .setDisplayName(fullName)
                                             .build()
-                                        user?.updateProfile(profileUpdates)?.addOnCompleteListener {
-                                            isLoading = false
-                                            onSignupSuccess()
-                                        } ?: run {
-                                            isLoading = false
-                                            onSignupSuccess()
+
+                                        fun finishSignup() {
+                                            if (uid.isBlank()) {
+                                                isLoading = false
+                                                onSignupSuccess()
+                                                return
+                                            }
+                                            // Clear shared farm cache and start this uid empty
+                                            // before dashboard hydrate/sync can upload leftovers.
+                                            scope.launch {
+                                                runCatching {
+                                                    FarmAccountIsolation.prepareFreshSignup(
+                                                        context = context,
+                                                        uid = uid,
+                                                        farmRepository = UserFarmRepository(context)
+                                                    )
+                                                }
+                                                runCatching {
+                                                    FirestoreFarmRepository().saveProfile(
+                                                        uid = uid,
+                                                        profile = FarmerProfile(
+                                                            firstName = firstName.trim(),
+                                                            middleInitial = middleName.trim()
+                                                                .uppercase()
+                                                                .take(1),
+                                                            lastName = lastName.trim(),
+                                                            email = email.trim()
+                                                        ),
+                                                        includePhoto = false
+                                                    )
+                                                }
+                                                isLoading = false
+                                                onSignupSuccess()
+                                            }
+                                        }
+
+                                        if (user != null) {
+                                            user.updateProfile(profileUpdates)
+                                                .addOnCompleteListener { finishSignup() }
+                                        } else {
+                                            finishSignup()
                                         }
                                     } else {
                                         isLoading = false

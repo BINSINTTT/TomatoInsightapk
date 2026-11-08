@@ -102,6 +102,20 @@ class UserFarmRepository(context: Context) {
         dao.deleteScans(userId, scanIds)
     }
 
+    /** Wipes this uid's local farm rows (used after signup so a new account starts empty). */
+    suspend fun clearForUser(userId: String) = withContext(Dispatchers.IO) {
+        if (userId.isBlank()) return@withContext
+        val scanIds = dao.getScans(userId).map { it.scanId }
+        if (scanIds.isNotEmpty()) {
+            scanIds.forEach { scanId ->
+                File(imagesDir(userId), "$scanId.jpg").delete()
+            }
+        }
+        dao.clearUserFarm(userId)
+        farmDataFile(userId).delete()
+        imagesDir(userId).deleteRecursively()
+    }
+
     suspend fun saveForUser(
         userId: String,
         rows: Int,

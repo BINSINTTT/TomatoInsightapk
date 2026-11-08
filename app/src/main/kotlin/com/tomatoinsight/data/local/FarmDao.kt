@@ -45,6 +45,17 @@ interface FarmDao {
     @Query("DELETE FROM tile_scans WHERE userId = :userId AND scanId IN (:scanIds)")
     suspend fun deleteScans(userId: String, scanIds: List<Long>)
 
+    @Query("DELETE FROM farm_meta WHERE userId = :userId")
+    suspend fun clearMeta(userId: String)
+
+    @Transaction
+    suspend fun clearUserFarm(userId: String) {
+        clearMeta(userId)
+        clearScans(userId)
+        clearPlantNames(userId)
+        clearDeletions(userId)
+    }
+
     @Transaction
     suspend fun replaceUserFarm(
         meta: FarmMetaEntity,
