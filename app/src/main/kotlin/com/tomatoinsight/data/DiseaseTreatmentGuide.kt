@@ -18,15 +18,36 @@ data class DiseaseTreatment(
 )
 
 /** Built-in care text for every score above 0%, highest first. */
-fun treatmentsForDetectedScores(scores: List<DiseaseScore>): List<DiseaseTreatment> =
+fun treatmentsForDetectedScores(
+    scores: List<DiseaseScore>,
+    severityLabel: String? = null,
+    affectedAreaPct: Double? = null
+): List<DiseaseTreatment> =
     scores
         .filter { it.percent > 0 }
         .sortedByDescending { it.percent }
-        .map { treatmentForTopDisease(it.name, it.percent) }
+        .mapIndexed { index, score ->
+            treatmentForTopDisease(
+                diseaseName = score.name,
+                confidencePercent = score.percent,
+                severityLabel = if (index == 0) severityLabel else null,
+                affectedAreaPct = if (index == 0) affectedAreaPct else null
+            )
+        }
 
-fun treatmentForTopDisease(diseaseName: String, confidencePercent: Int): DiseaseTreatment {
-    val severity = diseaseSeverityLabel(diseaseName, confidencePercent)
+fun treatmentForTopDisease(
+    diseaseName: String,
+    confidencePercent: Int,
+    severityLabel: String? = null,
+    affectedAreaPct: Double? = null
+): DiseaseTreatment {
+    val severity = diseaseSeverityLabel(
+        name = diseaseName,
+        affectedAreaPct = affectedAreaPct,
+        explicitLabel = severityLabel
+    )
     val key = normalizeDiseaseKey(diseaseName)
+    val extentPct = affectedAreaPct?.let { kotlin.math.round(it).toInt().coerceIn(0, 100) }
 
     val base = when {
         key.contains("earlyblight") || key == "eb" -> earlyBlightTreatment()
@@ -36,18 +57,25 @@ fun treatmentForTopDisease(diseaseName: String, confidencePercent: Int): Disease
         else -> genericDiseaseTreatment(diseaseName)
     }
 
-    val critical = !isHealthyDisease(diseaseName) && confidencePercent >= 100
+    val critical =
+        !isHealthyDisease(diseaseName) &&
+            severity != "Unable to Assess" &&
+            (extentPct ?: -1) >= 100
     val urgency = when {
-        isHealthyDisease(diseaseName) ->
+        isHealthyDisease(diseaseName) && severity != "Unable to Assess" ->
             "Keep up regular monitoring to catch problems early."
+        severity == "Unable to Assess" ->
+            "Severity could not be measured from this image. Confirm symptoms on the plant before treating; follow disease-specific steps cautiously."
         critical ->
-            "Critical (100%): remove this leaf immediately and destroy it away from the farm. Do not compost."
+            "Critical (severity 100%): remove this leaf immediately and destroy it away from the farm. Do not compost."
         severity == "Severe" ->
-            "Urgent ($confidencePercent%): start treatment within 24–48 hours."
+            "Urgent (estimated extent ${extentPct ?: "—"}%): start treatment within 24–48 hours."
         severity == "Moderate" ->
-            "Moderate ($confidencePercent%): treat this week before it spreads."
+            "Moderate (estimated extent ${extentPct ?: "—"}%): treat this week before it spreads."
+        severity == "Mild" ->
+            "Mild (estimated extent ${extentPct ?: "—"}%): monitor closely and treat if symptoms worsen."
         else ->
-            "Mild ($confidencePercent%): monitor closely and treat if symptoms worsen."
+            "Confirm symptoms on the plant before treating."
     }
     val steps = if (critical) {
         listOf(
@@ -231,7 +259,7 @@ fun ValidationResponse.ensureGuidesForAllDetections(): ValidationResponse {
     }
 
     val existing = aiRecommendations?.sections.orEmpty()
-    val sections = detected.map { score ->
+    val sections = detected.mapIndexed { index, score ->
         val fromServer = existing.firstOrNull { sectionMatches(it, score) }
         if (fromServer != null) {
             fromServer.copy(
@@ -239,7 +267,12 @@ fun ValidationResponse.ensureGuidesForAllDetections(): ValidationResponse {
                 confidencePercent = score.percent
             )
         } else {
-            treatmentForTopDisease(score.name, score.percent).toAiSection(score.percent)
+            treatmentForTopDisease(
+                diseaseName = score.name,
+                confidencePercent = score.percent,
+                severityLabel = if (index == 0) severityLabel else null,
+                affectedAreaPct = if (index == 0) affectedAreaPct else null
+            ).toAiSection(score.percent)
         }
     }
     val combined = if (sections.size > 1) {

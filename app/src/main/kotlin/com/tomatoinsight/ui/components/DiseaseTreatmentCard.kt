@@ -50,7 +50,11 @@ fun DiseaseTreatmentCard(
         GroqTreatmentCard(withAllGuides)
         return
     }
-    val detected = treatmentsForDetectedScores(result.allDiseaseScores)
+    val detected = treatmentsForDetectedScores(
+        scores = result.allDiseaseScores,
+        severityLabel = result.severityLabel,
+        affectedAreaPct = result.affectedAreaPct
+    )
     if (detected.isNotEmpty()) {
         OfflineTreatmentCard(result, detected)
         return

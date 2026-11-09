@@ -52,6 +52,7 @@ import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import com.tomatoinsight.api.ImageUploadHelper
+import com.tomatoinsight.api.WebsiteScanClient
 import com.tomatoinsight.ml.OfflineDiseaseClassifier
 import com.tomatoinsight.ml.OfflineLeafValidator
 import com.tomatoinsight.util.hasValidatedInternet
@@ -65,6 +66,7 @@ import com.tomatoinsight.data.asSavedValidationResponse
 import com.tomatoinsight.data.ensureGuidesForAllDetections
 import com.tomatoinsight.api.ValidationRetrofitClient
 import retrofit2.HttpException
+import java.io.ByteArrayOutputStream
 import com.tomatoinsight.ui.camera.LeafCameraScreen
 import com.tomatoinsight.ui.components.CustomBottomBar
 import com.tomatoinsight.ui.components.InvalidLeafValidationDialog
@@ -166,14 +168,44 @@ fun PlantInfoScreen(
                 } else {
                     response
                 }
-                validationResult = scored
-                val leafOnly = scored.stage == "offline" && !scored.hasDiseaseResult
-                hasPendingSave = scored.confirmsTomatoLeaf() && !leafOnly
-                showNotTomatoAlert = !scored.isError && !scored.confirmsTomatoLeaf()
+                // OpenCV severity from Render — separate from AI confidence.
+                val withSeverity = if (scored.confirmsTomatoLeaf() && context.hasValidatedInternet()) {
+                    withContext(Dispatchers.IO) {
+                        val bytes = ByteArrayOutputStream().use { stream ->
+                            bitmap.compress(Bitmap.CompressFormat.JPEG, 95, stream)
+                            stream.toByteArray()
+                        }
+                        WebsiteScanClient.withOpenCvSeverity(bytes, scored)
+                    }
+                } else if (scored.confirmsTomatoLeaf()) {
+                    val top = scored.allDiseaseScores.maxByOrNull { it.percent }
+                    if (top != null && isHealthyDisease(top.name)) {
+                        scored.copy(
+                            severityLabel = "Healthy",
+                            affectedAreaPct = 0.0,
+                            severityAssessable = true,
+                            severityReason = "offline_healthy"
+                        )
+                    } else {
+                        scored.copy(
+                            severityLabel = "Unable to Assess",
+                            affectedAreaPct = null,
+                            severityAssessable = false,
+                            severityReason = "offline_no_opencv"
+                        )
+                    }
+                } else {
+                    scored
+                }
+                validationResult = withSeverity
+                val leafOnly = withSeverity.stage == "offline" && !withSeverity.hasDiseaseResult
+                hasPendingSave = withSeverity.confirmsTomatoLeaf() && !leafOnly
+                showNotTomatoAlert = !withSeverity.isError && !withSeverity.confirmsTomatoLeaf()
                 Log.d(
                     "TomatoInsight",
-                    "Validation result=${scored.result}, class=${scored.detectedClass}, " +
-                        "disease=${scored.topDisease} mode=${scored.inferenceMode}"
+                    "Validation result=${withSeverity.result}, class=${withSeverity.detectedClass}, " +
+                        "disease=${withSeverity.topDisease} severity=${withSeverity.severityLabel} " +
+                        "area=${withSeverity.affectedAreaPct} mode=${withSeverity.inferenceMode}"
                 )
             } catch (e: kotlinx.coroutines.TimeoutCancellationException) {
                 Log.e("TomatoInsight", "Validation timed out", e)

@@ -149,8 +149,102 @@ object WebsiteScanClient {
         return readObject(response, route)
     }
 
-    private suspend fun requestRecommendation(scores: Map<String, Double>): CareResult {
-        val body = gson.toJson(mapOf("scores" to scores)).toRequestBody(jsonType)
+    /**
+     * Calls Render OpenCV `/assess-severity` using the top disease class.
+     * Does not use AI confidence. Falls back to Unable to Assess / Healthy 0%.
+     */
+    suspend fun withOpenCvSeverity(
+        imageBytes: ByteArray,
+        response: ValidationResponse
+    ): ValidationResponse {
+        if (!response.confirmsTomatoLeaf()) return response
+        val top = response.allDiseaseScores.maxByOrNull { it.percent }?.takeIf { it.percent > 0 }
+            ?: return response.copy(
+                severityLabel = "Unable to Assess",
+                affectedAreaPct = null,
+                severityAssessable = false,
+                severityReason = "no_top_disease"
+            )
+        val barKey = barKeyOrNull(top.name) ?: "early_blight"
+        if (isHealthyDisease(top.name) || barKey == "healthy") {
+            return runCatching { mergeSeverity(response, postSeverity(imageBytes, "healthy")) }
+                .getOrElse {
+                    response.copy(
+                        severityLabel = "Healthy",
+                        affectedAreaPct = 0.0,
+                        severityAssessable = true,
+                        severityReason = "classified_healthy_local_fallback"
+                    )
+                }
+        }
+        return runCatching { mergeSeverity(response, postSeverity(imageBytes, barKey)) }
+            .getOrElse {
+                response.copy(
+                    severityLabel = "Unable to Assess",
+                    affectedAreaPct = null,
+                    severityAssessable = false,
+                    severityReason = "severity_request_failed"
+                )
+            }
+    }
+
+    private data class SeverityFields(
+        val severityLabel: String,
+        val affectedAreaPct: Double?,
+        val severityAssessable: Boolean,
+        val severityReason: String?
+    )
+
+    private fun mergeSeverity(base: ValidationResponse, severity: SeverityFields): ValidationResponse =
+        base.copy(
+            severityLabel = severity.severityLabel,
+            affectedAreaPct = severity.affectedAreaPct,
+            severityAssessable = severity.severityAssessable,
+            severityReason = severity.severityReason
+        )
+
+    private suspend fun postSeverity(imageBytes: ByteArray, diseaseKey: String): SeverityFields {
+        val diseaseBody = diseaseKey.toRequestBody("text/plain".toMediaType())
+        val http = ValidationRetrofitClient.instance.assessSeverity(
+            imageBytes.toLeafPart(),
+            diseaseBody,
+            diseaseBody
+        )
+        val payload = readObject(http, "assess-severity")
+        val label = payload.text("severity") ?: "Unable to Assess"
+        val measurable = payload.bool("measurable") == true
+        val area = payload.number("affected_area_pct")
+        val isHealthy = diseaseKey == "healthy" || label.equals("Healthy", ignoreCase = true)
+        val areaPct = when {
+            isHealthy -> area?.coerceIn(0.0, 100.0) ?: 0.0
+            measurable && area != null -> area.coerceIn(0.0, 100.0)
+            else -> null
+        }
+        return SeverityFields(
+            severityLabel = if (isHealthy) "Healthy" else label,
+            affectedAreaPct = areaPct,
+            severityAssessable = if (isHealthy) {
+                true
+            } else {
+                measurable && !label.equals("Unable to Assess", ignoreCase = true)
+            },
+            severityReason = payload.text("reason")
+        )
+    }
+
+    private suspend fun requestRecommendation(
+        scores: Map<String, Double>,
+        severityPct: Double? = null,
+        severityLabel: String? = null
+    ): CareResult {
+        val requestMap = mutableMapOf<String, Any>("scores" to scores)
+        if (severityPct != null && severityPct.isFinite() && severityPct >= 0) {
+            requestMap["severity_pct"] = severityPct.coerceIn(0.0, 100.0)
+        }
+        if (!severityLabel.isNullOrBlank()) {
+            requestMap["severity_label"] = severityLabel
+        }
+        val body = gson.toJson(requestMap).toRequestBody(jsonType)
         val response = ValidationRetrofitClient.instance.recommendCare(body)
         if (!response.isSuccessful) {
             val message = errorMessage(response.body(), response.errorBody()?.string(), response.code())

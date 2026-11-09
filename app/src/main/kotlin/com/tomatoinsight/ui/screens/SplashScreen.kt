@@ -37,17 +37,14 @@ import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import com.google.firebase.auth.FirebaseAuth
 import com.tomatoinsight.R
+import com.tomatoinsight.ui.theme.TomatoGreen
+import com.tomatoinsight.ui.theme.TomatoRed
 import kotlinx.coroutines.delay
 
 private const val SPLASH_HOLD_MS = 1_800L
 
-/** Soft muted red — easier on the eyes than bright tomato red. */
-private val SplashBackground = Color(0xFFB85C54)
-
-/** Lighter coral-red so “Tomato” stays red and readable on the soft red backdrop. */
-private val SplashTomatoWord = Color(0xFFFFC4BC)
-
-private val SplashInsightWord = Color(0xFFFFF8F6)
+/** Soft cream so brand red and green both read clearly. */
+private val SplashBackground = Color(0xFFFFF8F5)
 
 /** Route after the splash screen for the current auth and onboarding state. */
 fun appRouteAfterSplash(auth: FirebaseAuth, context: Context): String =
@@ -75,12 +72,13 @@ fun SplashScreen(onFinished: () -> Unit) {
     val title = buildAnnotatedString {
         withStyle(
             SpanStyle(
-                color = SplashTomatoWord,
+                color = TomatoRed,
                 fontWeight = FontWeight.Bold,
+                letterSpacing = 0.4.sp,
                 shadow = Shadow(
-                    color = Color(0x66000000),
-                    offset = Offset(0f, 1.5f),
-                    blurRadius = 4f
+                    color = Color(0x22000000),
+                    offset = Offset(0f, 1f),
+                    blurRadius = 2f
                 )
             )
         ) {
@@ -88,8 +86,14 @@ fun SplashScreen(onFinished: () -> Unit) {
         }
         withStyle(
             SpanStyle(
-                color = SplashInsightWord,
-                fontWeight = FontWeight.SemiBold
+                color = TomatoGreen,
+                fontWeight = FontWeight.Bold,
+                letterSpacing = 0.4.sp,
+                shadow = Shadow(
+                    color = Color(0x22000000),
+                    offset = Offset(0f, 1f),
+                    blurRadius = 2f
+                )
             )
         ) {
             append("Insight")
@@ -118,13 +122,13 @@ fun SplashScreen(onFinished: () -> Unit) {
             Spacer(modifier = Modifier.height(20.dp))
             Text(
                 text = title,
-                fontSize = 28.sp,
-                letterSpacing = 0.4.sp
+                fontSize = 30.sp,
+                fontWeight = FontWeight.Bold
             )
             Spacer(modifier = Modifier.height(24.dp))
             CircularProgressIndicator(
                 modifier = Modifier.size(28.dp),
-                color = SplashInsightWord,
+                color = TomatoGreen,
                 strokeWidth = 2.5.dp
             )
         }

@@ -20,7 +20,7 @@ object ApiConfig {
      * The live website API on Render.
      * Leaf check, disease scores, and care text are three calls on this host.
      */
-    const val VALIDATION_SERVER_URL = "https://tomatoinsighttestdeployment.onrender.com/"
+    const val VALIDATION_SERVER_URL = "https://tomatoinsight.onrender.com/"
 
     /**
      * Roboflow Serverless Workflow path (used by Python server, not called directly

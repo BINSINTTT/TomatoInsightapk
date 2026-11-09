@@ -233,12 +233,7 @@ fun TomatoInsightApp() {
             result.account?.let { accountCredits = it }
             checkoutPack = null
             showOutOfCredit = false
-            val note = when {
-                result.paymentRulesHint ->
-                    "Credits updated. Add Firestore payments rules to save purchase history."
-                else -> remainingCreditsLine(result.balance)
-            }
-            showCreditToast("+${pack.credits} credits added", note, "grant")
+            showCreditToast("+${pack.credits} credits added", "", "grant")
             val listed = creditRepository.listPayments(userId)
             payments = listed.rows
             paymentsNote = listed.error

@@ -39,6 +39,11 @@ private val TitleInk = Color(0xFF1C1B1F)
 private val BarTrack = Color(0xFFE5E7EB)
 private val HealthyBarGreen = Color(0xFF7CB342)
 private val DiseaseBarRed = Color(0xFFE57373)
+private val HealthySeverity = Color(0xFF2E7D32)
+private val MildSeverity = Color(0xFFC77800)
+private val ModerateSeverity = Color(0xFFD84315)
+private val SevereSeverity = Color(0xFF9B2B26)
+private val UnableSeverity = Color(0xFF6B7280)
 
 @Composable
 fun HealthStatusCard(result: ValidationResponse? = null) {
@@ -52,9 +57,28 @@ fun HealthStatusCard(result: ValidationResponse? = null) {
     val filled = result != null
     val leading = if (filled) scores.maxByOrNull { it.percent }?.takeIf { it.percent > 0 } else null
     val confidence = leading?.percent
+    val isHealthy = leading != null && isHealthyDisease(leading.name)
+    val affectedAreaPct = when {
+        leading == null -> null
+        isHealthy -> result?.affectedAreaPct ?: 0.0
+        result?.severityAssessable == true -> result.affectedAreaPct
+        else -> result?.affectedAreaPct
+    }
+    val affectedAreaText = when {
+        leading == null -> "—"
+        isHealthy -> formatAreaPct(affectedAreaPct ?: 0.0)
+        affectedAreaPct != null && result?.severityAssessable == true -> formatAreaPct(affectedAreaPct)
+        else -> "—"
+    }
     val severity = when {
         leading == null -> "—"
-        else -> diseaseSeverityLabel(leading.name, leading.percent)
+        else -> diseaseSeverityLabel(
+            name = leading.name,
+            affectedAreaPct = affectedAreaPct,
+            explicitLabel = result?.severityLabel
+        ).let { label ->
+            if (isHealthy && (label.isBlank() || label == "Unable to Assess")) "Healthy" else label
+        }
     }
     val diseaseTitle = when {
         leading == null -> "Waiting for scan"
@@ -91,7 +115,7 @@ fun HealthStatusCard(result: ValidationResponse? = null) {
 
             Row(
                 modifier = Modifier.fillMaxWidth(),
-                horizontalArrangement = Arrangement.spacedBy(12.dp)
+                horizontalArrangement = Arrangement.spacedBy(8.dp)
             ) {
                 MetricCard(
                     label = "AI Confidence",
@@ -99,8 +123,14 @@ fun HealthStatusCard(result: ValidationResponse? = null) {
                     modifier = Modifier.weight(1f)
                 )
                 MetricCard(
+                    label = "Estimated affected leaf area",
+                    value = affectedAreaText,
+                    modifier = Modifier.weight(1f)
+                )
+                MetricCard(
                     label = "Symptom Severity",
                     value = severity,
+                    valueColor = severityColor(severity),
                     modifier = Modifier.weight(1f)
                 )
             }
@@ -125,29 +155,33 @@ fun HealthStatusCard(result: ValidationResponse? = null) {
 private fun MetricCard(
     label: String,
     value: String,
-    modifier: Modifier = Modifier
+    modifier: Modifier = Modifier,
+    valueColor: Color = TitleInk
 ) {
     Column(
         modifier = modifier
             .clip(RoundedCornerShape(16.dp))
             .background(CardLight)
-            .padding(horizontal = 14.dp, vertical = 16.dp),
+            .padding(horizontal = 10.dp, vertical = 14.dp),
         horizontalAlignment = Alignment.CenterHorizontally
     ) {
         Text(
             text = label,
             color = LabelGray,
-            fontSize = 12.sp,
+            fontSize = 11.sp,
             fontWeight = FontWeight.Medium,
-            textAlign = TextAlign.Center
+            textAlign = TextAlign.Center,
+            lineHeight = 14.sp
         )
-        Spacer(modifier = Modifier.height(10.dp))
+        Spacer(modifier = Modifier.height(8.dp))
         Text(
             text = value,
-            color = TitleInk,
-            fontSize = 28.sp,
+            color = valueColor,
+            fontSize = 18.sp,
             fontWeight = FontWeight.Bold,
-            textAlign = TextAlign.Center
+            textAlign = TextAlign.Center,
+            maxLines = 2,
+            lineHeight = 22.sp
         )
     }
 }
@@ -202,6 +236,24 @@ private fun DiseaseProgressRow(
     }
 }
 
+private fun formatAreaPct(value: Double): String {
+    val rounded = kotlin.math.round(value * 10.0) / 10.0
+    return if (rounded == rounded.toLong().toDouble()) {
+        "${rounded.toLong()}%"
+    } else {
+        "$rounded%"
+    }
+}
+
+private fun severityColor(label: String): Color = when (label.lowercase()) {
+    "healthy" -> HealthySeverity
+    "mild" -> MildSeverity
+    "moderate" -> ModerateSeverity
+    "severe" -> SevereSeverity
+    "unable to assess" -> UnableSeverity
+    else -> TitleInk
+}
+
 private fun detectedDiseaseTitle(name: String): String = when {
     name.equals("Healthy", ignoreCase = true) -> "Healthy"
     name.contains("yellow leaf curl", ignoreCase = true) || name.equals("TLCV", ignoreCase = true) ->
@@ -209,6 +261,6 @@ private fun detectedDiseaseTitle(name: String): String = when {
     name.contains("spotted wilt", ignoreCase = true) || name.equals("TSWV", ignoreCase = true) ->
         "Tomato Spotted Wilt Virus (TSWV)"
     name.contains("early blight", ignoreCase = true) ->
-        "Early Blight (EB)"
+        "Early Blight"
     else -> diseaseDisplayLabel(name)
 }

@@ -87,7 +87,17 @@ data class ValidationResponse(
     @SerializedName("recommendation_source")
     val recommendationSource: String? = null,
     @SerializedName("groq_model")
-    val groqModel: String? = null
+    val groqModel: String? = null,
+    /** OpenCV severity label — never derived from AI confidence. */
+    @SerializedName("severity_label")
+    val severityLabel: String? = null,
+    /** Estimated affected leaf area % when measurable; 0 for Healthy. */
+    @SerializedName("affected_area_pct")
+    val affectedAreaPct: Double? = null,
+    @SerializedName("severity_assessable")
+    val severityAssessable: Boolean? = null,
+    @SerializedName("severity_reason")
+    val severityReason: String? = null
 ) {
     val hasAiRecommendations: Boolean
         get() = !aiRecommendations?.sections.isNullOrEmpty()
@@ -218,12 +228,30 @@ fun diseaseAbbreviation(name: String): String = when {
     else -> name.split(" ").take(2).joinToString("") { it.first().uppercaseChar().toString() }
 }
 
-fun diseaseSeverityLabel(name: String, confidencePercent: Int): String = when {
-    name.equals("Healthy", ignoreCase = true) -> "Healthy"
-    confidencePercent >= 67 -> "Severe"
-    confidencePercent >= 34 -> "Moderate"
-    else -> "Mild"
+/**
+ * Prefer an explicit OpenCV severity label. Never treat AI confidence as severity.
+ * When [affectedAreaPct] is measurable, map provisional Mild/Moderate/Severe bands.
+ */
+fun diseaseSeverityLabel(
+    name: String,
+    affectedAreaPct: Double? = null,
+    explicitLabel: String? = null
+): String {
+    if (!explicitLabel.isNullOrBlank()) return explicitLabel
+    if (name.equals("Healthy", ignoreCase = true)) return "Healthy"
+    val pct = affectedAreaPct
+    if (pct == null || !pct.isFinite()) return "Unable to Assess"
+    return when {
+        pct >= 67.0 -> "Severe"
+        pct >= 34.0 -> "Moderate"
+        pct > 0.0 -> "Mild"
+        else -> "Unable to Assess"
+    }
 }
+
+/** @deprecated Prefer [diseaseSeverityLabel] with OpenCV extent, not confidence. */
+fun diseaseSeverityLabel(name: String, confidencePercent: Int): String =
+    diseaseSeverityLabel(name, affectedAreaPct = null, explicitLabel = null)
 
 fun isHealthyDisease(name: String): Boolean =
     name.equals("Healthy", ignoreCase = true)
@@ -256,5 +284,13 @@ interface ValidationApiService {
     @POST("recommend")
     suspend fun recommendCare(
         @Body body: RequestBody
+    ): Response<JsonElement>
+
+    @Multipart
+    @POST("assess-severity")
+    suspend fun assessSeverity(
+        @Part file: MultipartBody.Part,
+        @Part("disease") disease: RequestBody,
+        @Part("bar_key") barKey: RequestBody
     ): Response<JsonElement>
 }

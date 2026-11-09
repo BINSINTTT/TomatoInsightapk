@@ -13,6 +13,7 @@ import androidx.compose.foundation.layout.heightIn
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
+import androidx.compose.foundation.layout.wrapContentWidth
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
@@ -66,6 +67,7 @@ fun CreditToastHost(
         modifier = Modifier
             .fillMaxWidth()
             .padding(horizontal = 16.dp, vertical = 12.dp),
+        horizontalAlignment = Alignment.End,
         verticalArrangement = Arrangement.spacedBy(8.dp)
     ) {
         toasts.takeLast(3).forEach { toast ->
@@ -78,15 +80,22 @@ fun CreditToastHost(
                 "accent" -> Color(0xFFB86A12)
                 else -> Color(0xFF1B5E20)
             }
+            val titleOnly = toast.text.isBlank()
             Surface(
-                modifier = Modifier.fillMaxWidth(),
+                modifier = if (titleOnly) Modifier.wrapContentWidth() else Modifier.fillMaxWidth(),
                 shape = RoundedCornerShape(16.dp),
                 color = Color.White,
                 shadowElevation = 8.dp
             ) {
                 Row(
-                    modifier = Modifier.padding(14.dp),
-                    verticalAlignment = Alignment.CenterVertically
+                    modifier = Modifier.padding(
+                        start = 12.dp,
+                        end = if (titleOnly) 8.dp else 12.dp,
+                        top = 10.dp,
+                        bottom = 10.dp
+                    ),
+                    verticalAlignment = Alignment.CenterVertically,
+                    horizontalArrangement = if (titleOnly) Arrangement.Center else Arrangement.Start
                 ) {
                     Text(
                         text = if (toast.kind == "deduct") "–" else "✓",
@@ -97,7 +106,11 @@ fun CreditToastHost(
                             .background(accent, RoundedCornerShape(12.dp))
                             .padding(horizontal = 10.dp, vertical = 8.dp)
                     )
-                    Column(modifier = Modifier.padding(start = 12.dp).weight(1f)) {
+                    Column(
+                        modifier = Modifier
+                            .padding(start = 10.dp)
+                            .then(if (titleOnly) Modifier else Modifier.weight(1f))
+                    ) {
                         Text(toast.title, fontWeight = FontWeight.Bold, color = Color(0xFF243046), fontSize = 14.sp)
                         if (toast.text.isNotBlank()) {
                             Text(toast.text, color = Color(0xFF667085), fontSize = 13.sp)
