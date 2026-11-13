@@ -40,6 +40,30 @@ internal fun bitmapToNchw(bitmap: Bitmap, size: Int): ByteBuffer {
     return buffer
 }
 
+/** RGB 0–1, channels-last input used by Ultralytics TFLite segmentation exports. */
+internal fun bitmapToNhwc(bitmap: Bitmap, size: Int): ByteBuffer {
+    val squared = ultralyticsLetterBox(bitmap, size)
+    val pixels = IntArray(size * size)
+    squared.getPixels(pixels, 0, size, 0, 0, size, size)
+    if (squared !== bitmap) squared.recycle()
+
+    val buffer = ByteBuffer.allocateDirect(1 * size * size * 3 * 4)
+    buffer.order(ByteOrder.nativeOrder())
+    for (pixel in pixels) {
+        buffer.putFloat(((pixel shr 16) and 0xFF) / 255f)
+        buffer.putFloat(((pixel shr 8) and 0xFF) / 255f)
+        buffer.putFloat((pixel and 0xFF) / 255f)
+    }
+    buffer.rewind()
+    return buffer
+}
+
+internal fun Interpreter.bitmapInput(bitmap: Bitmap, fallback: Int): ByteBuffer {
+    val shape = getInputTensor(0).shape()
+    val size = inputImageSize(fallback)
+    return if (shape.size == 4 && shape[1] == 3) bitmapToNchw(bitmap, size) else bitmapToNhwc(bitmap, size)
+}
+
 /** Read imgsz from the loaded TFLite input tensor ([1,3,H,W] or [1,H,W,3]). */
 internal fun Interpreter.inputImageSize(fallback: Int): Int {
     val shape = getInputTensor(0).shape()

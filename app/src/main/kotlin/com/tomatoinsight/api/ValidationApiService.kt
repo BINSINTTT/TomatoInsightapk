@@ -88,7 +88,7 @@ data class ValidationResponse(
     val recommendationSource: String? = null,
     @SerializedName("groq_model")
     val groqModel: String? = null,
-    /** OpenCV severity label — never derived from AI confidence. */
+    /** Segmentation severity label — never derived from AI confidence. */
     @SerializedName("severity_label")
     val severityLabel: String? = null,
     /** Estimated affected leaf area % when measurable; 0 for Healthy. */
@@ -229,7 +229,7 @@ fun diseaseAbbreviation(name: String): String = when {
 }
 
 /**
- * Prefer an explicit OpenCV severity label. Never treat AI confidence as severity.
+ * Prefer an explicit segmentation severity label. Never treat AI confidence as severity.
  * When [affectedAreaPct] is measurable, map provisional Mild/Moderate/Severe bands.
  */
 fun diseaseSeverityLabel(
@@ -279,6 +279,13 @@ interface ValidationApiService {
     @POST("classify")
     suspend fun classifyLeaf(
         @Part file: MultipartBody.Part
+    ): Response<JsonElement>
+
+    @Multipart
+    @POST("refine-disease")
+    suspend fun refineDisease(
+        @Part file: MultipartBody.Part,
+        @Part("main_scores") mainScores: RequestBody
     ): Response<JsonElement>
 
     @POST("recommend")

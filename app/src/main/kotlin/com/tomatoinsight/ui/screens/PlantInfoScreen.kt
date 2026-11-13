@@ -54,6 +54,7 @@ import androidx.compose.ui.unit.sp
 import com.tomatoinsight.api.ImageUploadHelper
 import com.tomatoinsight.api.WebsiteScanClient
 import com.tomatoinsight.ml.OfflineDiseaseClassifier
+import com.tomatoinsight.ml.OfflineEarlySpottedSpecialist
 import com.tomatoinsight.ml.OfflineLeafValidator
 import com.tomatoinsight.util.hasValidatedInternet
 import com.tomatoinsight.util.observeValidatedInternet
@@ -168,34 +169,50 @@ fun PlantInfoScreen(
                 } else {
                     response
                 }
-                // OpenCV severity from Render — separate from AI confidence.
-                val withSeverity = if (scored.confirmsTomatoLeaf() && context.hasValidatedInternet()) {
+                val refined = if (scored.confirmsTomatoLeaf() && context.hasValidatedInternet()) {
                     withContext(Dispatchers.IO) {
                         val bytes = ByteArrayOutputStream().use { stream ->
                             bitmap.compress(Bitmap.CompressFormat.JPEG, 95, stream)
                             stream.toByteArray()
                         }
-                        WebsiteScanClient.withOpenCvSeverity(bytes, scored)
+                        WebsiteScanClient.withSpecialistRefinement(bytes, scored)
                     }
                 } else if (scored.confirmsTomatoLeaf()) {
-                    val top = scored.allDiseaseScores.maxByOrNull { it.percent }
+                    withContext(Dispatchers.IO) {
+                        val prepared = ImageUploadHelper.bitmapForOnDeviceScan(bitmap)
+                        OfflineEarlySpottedSpecialist.refine(context, prepared, scored)
+                    }
+                } else {
+                    scored
+                }
+                // Severity segmentation runs after the final refined disease choice.
+                val withSeverity = if (refined.confirmsTomatoLeaf() && context.hasValidatedInternet()) {
+                    withContext(Dispatchers.IO) {
+                        val bytes = ByteArrayOutputStream().use { stream ->
+                            bitmap.compress(Bitmap.CompressFormat.JPEG, 95, stream)
+                            stream.toByteArray()
+                        }
+                        WebsiteScanClient.withSegmentationSeverity(bytes, refined)
+                    }
+                } else if (refined.confirmsTomatoLeaf()) {
+                    val top = refined.allDiseaseScores.maxByOrNull { it.percent }
                     if (top != null && isHealthyDisease(top.name)) {
-                        scored.copy(
+                        refined.copy(
                             severityLabel = "Healthy",
                             affectedAreaPct = 0.0,
                             severityAssessable = true,
                             severityReason = "offline_healthy"
                         )
                     } else {
-                        scored.copy(
+                        refined.copy(
                             severityLabel = "Unable to Assess",
                             affectedAreaPct = null,
                             severityAssessable = false,
-                            severityReason = "offline_no_opencv"
+                            severityReason = "offline_no_severity_model"
                         )
                     }
                 } else {
-                    scored
+                    refined
                 }
                 validationResult = withSeverity
                 val leafOnly = withSeverity.stage == "offline" && !withSeverity.hasDiseaseResult
